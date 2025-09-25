@@ -3,61 +3,74 @@ import asyncio
 import aiohttp
 
 app = FastAPI()
-
 wled_ip = "192.168.1.109"
 
-# Define segments (adjust according to your setup)
-segments = [
-    {"id": i, "col": [[255, 255, 255]]} for i in range(10)
-]
+# Define segments
+segments = [{"id": i, "col": [[255, 255, 255]]} for i in range(10)]
 
-async def set_segments(seg_states):
-    """Send segment states to WLED."""
+# Track current segment states for up and down animations
+up_segs = [{"id": seg["id"], "on": False, "bri": 0, "col": seg["col"]} for seg in segments]
+down_segs = [{"id": seg["id"], "on": False, "bri": 0, "col": seg["col"]} for seg in segments]
+
+# Track active tasks
+up_task: asyncio.Task | None = None
+down_task: asyncio.Task | None = None
+
+async def set_segments(final_state):
     async with aiohttp.ClientSession() as session:
         url = f"http://{wled_ip}/json/state"
         try:
-            await session.post(url, json={"seg": seg_states})
+            await session.post(url, json={"seg": final_state})
         except Exception as e:
             print(f"Error sending request: {e}")
 
+def merge_segments():
+    """Merge up and down segment states."""
+    merged = []
+    for u, d in zip(up_segs, down_segs):
+        bri = max(u["bri"], d["bri"])
+        col = u["col"] if u["bri"] >= d["bri"] else d["col"]
+        merged.append({"id": u["id"], "on": bri > 0, "bri": bri, "col": col})
+    return merged
+
 async def animate_steps(direction="up"):
-    """Animate the steps up or down the staircase."""
-    if direction == "down":
-        seg_order = list(reversed(segments))  # Top sensor triggers downward animation
-    else:
-        seg_order = segments  # Bottom sensor triggers upward animation
+    global up_segs, down_segs
+    seg_order = list(reversed(segments)) if direction == "down" else segments
+    seg_states = up_segs if direction == "up" else down_segs
+    opposite_segs = down_segs if direction == "up" else up_segs
 
-    current_segs = [{"id": seg["id"], "on": False, "bri": 128, "col": seg["col"]} for seg in segments]
-
-    # Turn on segments one by one
     for seg in seg_order:
-        current_segs[seg["id"]]["on"] = True
-        current_segs[seg["id"]]["bri"] = 255
-        await set_segments(current_segs)
-        await asyncio.sleep(0.5)  # Delay between steps
+        # Stop if collision detected
+        if opposite_segs[seg["id"]]["bri"] > 0:
+            break
 
-        # Slightly dim for dramatic effect
-        current_segs[seg["id"]]["bri"] = 200
-        await set_segments(current_segs)
+        seg_states[seg["id"]]["bri"] = 255
+        seg_states[seg["id"]]["on"] = True
+        await set_segments(merge_segments())
+        await asyncio.sleep(0.5)
+
+        seg_states[seg["id"]]["bri"] = 150  # Slight dim
+        await set_segments(merge_segments())
         await asyncio.sleep(0.3)
 
-    # Wait a bit before turning off
+    # Turn off the segments after waiting
     await asyncio.sleep(5)
-
-    # Turn off segments in same order
     for seg in seg_order:
-        current_segs[seg["id"]]["on"] = False
-        await set_segments(current_segs)
+        seg_states[seg["id"]]["bri"] = 0
+        seg_states[seg["id"]]["on"] = False
+        await set_segments(merge_segments())
         await asyncio.sleep(0.2)
 
-@app.get("/bottom-sensor")
+@app.get("/1")
 async def bottom_sensor_trigger():
-    """Triggered when someone starts from the bottom."""
-    asyncio.create_task(animate_steps(direction="up"))
+    global up_task
+    if up_task is None or up_task.done():
+        up_task = asyncio.create_task(animate_steps(direction="up"))
     return {"status": "animation started from bottom"}
 
-@app.get("/top-sensor")
+@app.get("/2")
 async def top_sensor_trigger():
-    """Triggered when someone starts from the top."""
-    asyncio.create_task(animate_steps(direction="down"))
+    global down_task
+    if down_task is None or down_task.done():
+        down_task = asyncio.create_task(animate_steps(direction="down"))
     return {"status": "animation started from top"}
