@@ -4,7 +4,7 @@ import asyncio
 import aiohttp
 
 app = FastAPI()
-wled_ip = "192.168.1.109"
+wled_ip = "192.168.1.106"
 
 # Define segments
 segments = [{"id": i, "col": [[255, 255, 255]]} for i in range(10)]
@@ -96,6 +96,7 @@ async def animate_steps(direction="up", solid=False, color=None):
     else:
         fade_order = [[seg["id"]] for seg in (reversed(seg_order) if direction == "down" else seg_order)]
 
+    await asyncio.sleep(10)
     for group in fade_order:
         for step in range(5, -1, -1):
             for idx in group:
@@ -108,7 +109,7 @@ async def animate_steps(direction="up", solid=False, color=None):
                     down_segs[idx]["bri"] = brightness
                     down_segs[idx]["on"] = brightness > 0
             await set_segments(merge_segments())
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.1) # Adjust fade speed here
 
 async def set_all_lights(on: bool, color=None):
     global up_segs, down_segs, current_color
@@ -123,54 +124,6 @@ async def set_all_lights(on: bool, color=None):
         up_segs[seg["id"]]["col"] = [current_color]
         down_segs[seg["id"]]["col"] = [current_color]
     await set_segments(merge_segments())
-
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    html_content = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Staircase Control</title>
-        <style>
-            body { font-family: sans-serif; text-align: center; margin-top: 50px; }
-            button { font-size: 20px; padding: 20px; margin: 20px; cursor: pointer; }
-            input[type=color] { width: 100px; height: 40px; cursor: pointer; }
-        </style>
-    </head>
-    <body>
-        <h1>Staircase Sensor Simulation</h1>
-        <input type="color" id="colorPicker" value="#ffffff">
-        <label><input type="checkbox" id="solidMode"> Solid Mode</label><br><br>
-        <button onclick="trigger('1')">Bottom Sensor</button>
-        <button onclick="trigger('2')">Top Sensor</button>
-        <button onclick="toggle(true)">Lights On</button>
-        <button onclick="toggle(false)">Lights Off</button>
-
-        <script>
-            function hexToRgb(hex) {
-                let bigint = parseInt(hex.slice(1), 16);
-                let r = (bigint >> 16) & 255;
-                let g = (bigint >> 8) & 255;
-                let b = bigint & 255;
-                return [r, g, b];
-            }
-
-            async function trigger(sensor) {
-                const color = hexToRgb(document.getElementById("colorPicker").value);
-                const solid = document.getElementById("solidMode").checked;
-                await fetch(`/${sensor}?solid=${solid}&r=${color[0]}&g=${color[1]}&b=${color[2]}`);
-            }
-
-            async function toggle(on) {
-                const color = hexToRgb(document.getElementById("colorPicker").value);
-                await fetch(`/toggle?on=${on}&r=${color[0]}&g=${color[1]}&b=${color[2]}`);
-            }
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
-
 
 @app.get("/1")
 async def bottom_sensor_trigger(solid: bool = False, r: int = 255, g: int = 255, b: int = 255):
@@ -193,3 +146,73 @@ async def toggle_lights(on: bool = True, r: int = 255, g: int = 255, b: int = 25
     color = [r, g, b]
     await set_all_lights(on, color)
     return {"status": f"lights {'on' if on else 'off'}"}
+
+@app.get("/set_color")
+async def set_color(r: int = 255, g: int = 255, b: int = 255):
+    global current_color
+    current_color = [r, g, b]
+
+    # Update current segments with new color
+    for seg in segments:
+        if up_segs[seg["id"]]["on"]:
+            up_segs[seg["id"]]["col"] = [current_color]
+        if down_segs[seg["id"]]["on"]:
+            down_segs[seg["id"]]["col"] = [current_color]
+
+    await set_segments(merge_segments())
+    return {"status": "color updated", "color": current_color}
+
+
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Staircase Control</title>
+        <style>
+            body { font-family: sans-serif; text-align: center; margin-top: 50px; }
+            button { font-size: 20px; padding: 20px; margin: 20px; cursor: pointer; }
+            input[type=color] { width: 100px; height: 40px; cursor: pointer; }
+        </style>
+    </head>
+    <body>
+        <h1>Staircase Sensor Simulation</h1>
+        <input type="color" id="colorPicker" value="#ffffff" onchange="updateColor()">
+<label><input type="checkbox" id="solidMode"> Solid Mode</label><br><br>
+
+        <button onclick="trigger('1')">Bottom Sensor</button>
+        <button onclick="trigger('2')">Top Sensor</button>
+        <button onclick="toggle(true)">Lights On</button>
+        <button onclick="toggle(false)">Lights Off</button>
+
+        <script>
+    function hexToRgb(hex) {
+        let bigint = parseInt(hex.slice(1), 16);
+        let r = (bigint >> 16) & 255;
+        let g = (bigint >> 8) & 255;
+        let b = bigint & 255;
+        return [r, g, b];
+    }
+
+    async function updateColor() {
+        const color = hexToRgb(document.getElementById("colorPicker").value);
+        await fetch(`/set_color?r=${color[0]}&g=${color[1]}&b=${color[2]}`);
+    }
+
+    async function trigger(sensor) {
+        const color = hexToRgb(document.getElementById("colorPicker").value);
+        const solid = document.getElementById("solidMode").checked;
+        await fetch(`/${sensor}?solid=${solid}&r=${color[0]}&g=${color[1]}&b=${color[2]}`);
+    }
+
+    async function toggle(on) {
+        const color = hexToRgb(document.getElementById("colorPicker").value);
+        await fetch(`/toggle?on=${on}&r=${color[0]}&g=${color[1]}&b=${color[2]}`);
+    }
+</script>
+
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
