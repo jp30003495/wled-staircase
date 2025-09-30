@@ -5,4 +5,4 @@ services:
     container_name: python-server
     restart: unless-stopped      # Auto-start on Pi reboot
     ports:
-      - "8000:5000"             # Map host port 8000 → container port 5000
+      - "8001:5000"             # Map host port 8000 → container port 5000
