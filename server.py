@@ -27,6 +27,7 @@ async def set_segments(final_state):
         except Exception as e:
             print(f"Error sending request: {e}")
 
+# Combine up and down segment states
 def merge_segments():
     merged = []
     for u, d in zip(up_segs, down_segs):
