@@ -4,7 +4,7 @@ import asyncio
 import aiohttp
 
 app = FastAPI()
-wled_ip = "192.168.1.108"
+wled_ip = "192.168.1.107"
 
 # Define segments
 segments = [{"id": i, "col": [[255, 255, 255]]} for i in range(10)]
